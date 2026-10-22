@@ -56,6 +56,7 @@ export default function App() {
   const [errorType, setErrorType] = useState<'not_a_receipt' | 'network_error'>('network_error');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [technicalError, setTechnicalError] = useState<string>('');
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
 
   // Check if opened from a shared link with encoded data in URL hash
   useEffect(() => {
@@ -118,24 +119,20 @@ export default function App() {
     setCurrentScreen('review');
   };
 
-  // Send photo to Gemini OCR API with 30s timeout
-  const handleScanConfirmed = async () => {
-    if (!processedImage) return;
-
-    setCurrentScreen('scanning');
-
+  // Helper function to call OCR endpoint with 60s timeout
+  const executeScanRequest = async (img: ProcessedImage) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-    }, 30000); // 30-second timeout
+    }, 60000); // 60-second timeout
 
     try {
       const res = await fetch('/api/parse-receipt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: processedImage.base64,
-          mimeType: processedImage.mimeType,
+          imageBase64: img.base64,
+          mimeType: img.mimeType,
         }),
         signal: controller.signal,
       });
@@ -154,6 +151,23 @@ export default function App() {
       }
 
       const result: RawReceiptResponse = await res.json();
+      return result;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err;
+    }
+  };
+
+  // Send photo to Gemini OCR API with 60s timeout and automatic 1-time retry
+  const handleScanConfirmed = async () => {
+    if (!processedImage) return;
+
+    setCurrentScreen('scanning');
+    setIsRetrying(false);
+
+    try {
+      // First attempt
+      const result = await executeScanRequest(processedImage);
 
       if (!result.items || result.items.length === 0) {
         setErrorType('not_a_receipt');
@@ -164,20 +178,43 @@ export default function App() {
       }
 
       loadReceiptResponse(result);
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      console.error('OCR Parsing Error:', err);
-      setErrorType('network_error');
-      if (err?.name === 'AbortError') {
-        setErrorMessage('This is taking too long — check your connection and try again.');
-        setTechnicalError('AbortError: The request timed out after 30 seconds.');
-      } else {
-        setErrorMessage(
-          'We encountered a problem while processing the receipt. Please make sure the photo is clear and try again.'
-        );
-        setTechnicalError(err?.message || String(err));
+    } catch (firstErr: any) {
+      console.warn('Initial scan attempt failed, retrying once...', firstErr);
+
+      // Auto-retry once before showing the error screen
+      setIsRetrying(true);
+
+      try {
+        // Brief 800ms pause before retrying
+        await new Promise((resolve) => setTimeout(resolve, 800));
+
+        const retryResult = await executeScanRequest(processedImage);
+
+        if (!retryResult.items || retryResult.items.length === 0) {
+          setErrorType('not_a_receipt');
+          setErrorMessage("We couldn't detect any line items or prices.");
+          setTechnicalError('Gemini OCR returned empty items array on retry.');
+          setCurrentScreen('error');
+          return;
+        }
+
+        loadReceiptResponse(retryResult);
+      } catch (retryErr: any) {
+        console.error('Retry scan attempt failed:', retryErr);
+        setErrorType('network_error');
+        if (retryErr?.name === 'AbortError') {
+          setErrorMessage('This is taking too long — check your connection and try again.');
+          setTechnicalError('AbortError: The request timed out after 60 seconds (retry attempt).');
+        } else {
+          setErrorMessage(
+            'We encountered a problem while processing the receipt. Please make sure the photo is clear and try again.'
+          );
+          setTechnicalError(retryErr?.message || String(retryErr));
+        }
+        setCurrentScreen('error');
+      } finally {
+        setIsRetrying(false);
       }
-      setCurrentScreen('error');
     }
   };
 
@@ -203,6 +240,7 @@ export default function App() {
 
   const handleStartNew = () => {
     setProcessedImage(null);
+    setIsRetrying(false);
     // Clear URL hash
     if (window.location.hash) {
       history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -229,7 +267,10 @@ export default function App() {
       )}
 
       {currentScreen === 'scanning' && (
-        <ScanningScreen processedImage={processedImage} />
+        <ScanningScreen
+          processedImage={processedImage}
+          isRetrying={isRetrying}
+        />
       )}
 
       {currentScreen === 'error' && (

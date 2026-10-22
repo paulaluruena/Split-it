@@ -1,6 +1,6 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -24,6 +24,8 @@ const ai = new GoogleGenAI({
 });
 
 app.post('/api/parse-receipt', async (req, res) => {
+  const startTime = Date.now();
+  console.log(`[Gemini OCR] Received receipt parse request at ${new Date().toLocaleTimeString()}`);
   try {
     const { imageBase64, mimeType = 'image/jpeg' } = req.body;
 
@@ -73,6 +75,9 @@ Instructions:
         },
       ],
       config: {
+        thinkingConfig: {
+          thinkingLevel: ThinkingLevel.LOW,
+        },
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,
@@ -105,6 +110,9 @@ Instructions:
       },
     });
 
+    const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`[Gemini OCR] Call completed in ${elapsedSeconds} seconds`);
+
     const outputText = response.text;
     if (!outputText) {
       throw new Error('Empty response from AI model');
@@ -113,7 +121,8 @@ Instructions:
     const data = JSON.parse(outputText);
     return res.json(data);
   } catch (err: any) {
-    console.error('Receipt parse error:', err);
+    const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.error(`[Gemini OCR] Call failed after ${elapsedSeconds} seconds:`, err);
     return res.status(500).json({
       error: 'Failed to process receipt',
       message: err?.message || 'Server error occurred during OCR',

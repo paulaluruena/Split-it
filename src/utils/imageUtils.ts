@@ -32,7 +32,7 @@ export function processReceiptImage(file: File): Promise<ProcessedImage> {
 
       img.onload = () => {
         try {
-          const maxDimension = 2048;
+          const maxDimension = 1600;
           let width = img.width;
           let height = img.height;
 

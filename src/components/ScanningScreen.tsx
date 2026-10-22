@@ -4,6 +4,7 @@ import { ProcessedImage } from '../utils/imageUtils';
 
 interface ScanningScreenProps {
   processedImage?: ProcessedImage | null;
+  isRetrying?: boolean;
 }
 
 const ROTATING_MESSAGES = [
@@ -14,7 +15,10 @@ const ROTATING_MESSAGES = [
   'Polishing your item list…',
 ];
 
-export const ScanningScreen: React.FC<ScanningScreenProps> = ({ processedImage }) => {
+export const ScanningScreen: React.FC<ScanningScreenProps> = ({
+  processedImage,
+  isRetrying = false,
+}) => {
   const [messageIndex, setMessageIndex] = useState(0);
 
   useEffect(() => {
@@ -60,10 +64,10 @@ export const ScanningScreen: React.FC<ScanningScreenProps> = ({ processedImage }
       <div className="w-full space-y-3">
         <div className="h-10 flex items-center justify-center">
           <p
-            key={messageIndex}
+            key={isRetrying ? 'retrying' : messageIndex}
             className="text-lg font-bold text-stone-800 transition-all duration-300 animate-fadeIn"
           >
-            {ROTATING_MESSAGES[messageIndex]}
+            {isRetrying ? 'Still working… almost there' : ROTATING_MESSAGES[messageIndex]}
           </p>
         </div>
 
@@ -80,7 +84,7 @@ export const ScanningScreen: React.FC<ScanningScreenProps> = ({ processedImage }
         </div>
 
         <p className="text-xs text-stone-400">
-          This usually takes only 2–4 seconds
+          {isRetrying ? 'Retrying extraction automatically…' : 'This usually takes only 2–4 seconds'}
         </p>
       </div>
     </div>
