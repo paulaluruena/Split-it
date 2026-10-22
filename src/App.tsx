@@ -206,7 +206,7 @@ export default function App() {
         setErrorType('network_error');
         if (retryErr?.name === 'AbortError') {
           setErrorMessage('This is taking too long — check your connection and try again.');
-          setTechnicalError('AbortError: The request timed out after 60 seconds (client timeout).');
+          setTechnicalError('No response from server after 60 seconds (upload may have failed)');
         } else {
           setErrorMessage(
             'We encountered a problem while processing the receipt. Please make sure the photo is clear and try again.'

@@ -32,7 +32,7 @@ export function processReceiptImage(file: File): Promise<ProcessedImage> {
 
       img.onload = () => {
         try {
-          const maxDimension = 1600;
+          const maxDimension = 1024;
           let width = img.width;
           let height = img.height;
 
@@ -63,8 +63,8 @@ export function processReceiptImage(file: File): Promise<ProcessedImage> {
           // Draw the image scaled
           ctx.drawImage(img, 0, 0, width, height);
 
-          // Compress to JPEG with ~0.85 quality
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          // Compress to JPEG with ~0.7 quality
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
           const cleanBase64 = compressedDataUrl.replace(/^data:image\/jpeg;base64,/, '');
 
           const originalSizeKB = Math.round(file.size / 1024);
