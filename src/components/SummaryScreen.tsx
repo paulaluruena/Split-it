@@ -6,7 +6,6 @@ import {
   Check,
   RotateCcw,
   Sparkles,
-  ExternalLink,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -130,8 +129,16 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
           </span>
         </div>
 
-        <div className="text-3xl font-extrabold font-mono-num tracking-tight mt-1 mb-3">
-          {formatMoney(totalWithTaxAndTip, cur)}
+        <div className="flex items-center gap-3 mt-1 mb-3">
+          <span className="text-3xl font-extrabold font-mono-num tracking-tight">
+            {formatMoney(totalWithTaxAndTip, cur)}
+          </span>
+          {unassignedItems.length === 0 && (
+            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/25 text-emerald-300 border border-emerald-400/30 text-xs font-bold">
+              <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
+              <span>Adds up to the bill</span>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/10 text-xs">
@@ -238,7 +245,11 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
                               </span>
                             )}
                           </div>
-                          <span className="font-mono-num font-medium shrink-0">
+                          <span
+                            className={`font-mono-num font-medium shrink-0 ${
+                              shareAmount < 0 ? 'text-emerald-600 font-bold' : ''
+                            }`}
+                          >
                             {formatMoney(shareAmount, cur)}
                           </span>
                         </div>
@@ -258,21 +269,6 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
                         <span>Tip share:</span>
                         <span className="font-mono-num">{formatMoney(b.tipShare, cur)}</span>
                       </div>
-                    </div>
-
-                    {/* Quick Venmo / Payment Link Helper for this person */}
-                    <div className="pt-2 flex gap-2">
-                      <a
-                        href={`https://venmo.com/?txn=charge&amount=${b.total.toFixed(2)}&note=${encodeURIComponent(
-                          `Split It: ${state.restaurant || 'Meal'}`
-                        )}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 py-1.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[11px] font-bold text-center flex items-center justify-center gap-1 transition-colors"
-                      >
-                        <span>Request on Venmo</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
                     </div>
                   </div>
                 )}

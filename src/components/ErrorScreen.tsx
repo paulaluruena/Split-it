@@ -4,6 +4,7 @@ import { AlertCircle, RefreshCw, PlusCircle, HelpCircle } from 'lucide-react';
 interface ErrorScreenProps {
   type: 'not_a_receipt' | 'network_error';
   errorMessage?: string;
+  technicalError?: string;
   onTryAgain: () => void;
   onEnterManually: () => void;
 }
@@ -11,6 +12,7 @@ interface ErrorScreenProps {
 export const ErrorScreen: React.FC<ErrorScreenProps> = ({
   type,
   errorMessage,
+  technicalError,
   onTryAgain,
   onEnterManually,
 }) => {
@@ -29,11 +31,18 @@ export const ErrorScreen: React.FC<ErrorScreenProps> = ({
             : "Couldn't read the receipt"}
         </h2>
 
-        <p className="text-stone-600 text-sm max-w-xs font-medium leading-relaxed mb-6">
+        <p className="text-stone-600 text-sm max-w-xs font-medium leading-relaxed mb-2">
           {isNotReceipt
             ? "We couldn't detect any line items or prices. Try snapping a closer, well-lit photo of the bill."
             : errorMessage || "The image was too blurry or the connection dipped. Let's give it another shot."}
         </p>
+
+        {technicalError && (
+          <p className="text-[11px] font-mono text-stone-400 mb-6 max-w-xs break-words">
+            {technicalError}
+          </p>
+        )}
+        {!technicalError && <div className="mb-4" />}
 
         {/* Helpful tips box */}
         <div className="w-full bg-stone-50 rounded-2xl p-4 border border-stone-200 text-left text-xs text-stone-600 space-y-2 mb-6">

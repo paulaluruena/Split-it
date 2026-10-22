@@ -33,7 +33,13 @@ export const SplittingScreen: React.FC<SplittingScreenProps> = ({
     state.customTipAmount ? state.customTipAmount.toString() : ''
   );
 
+  const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
+  const [editingPersonName, setEditingPersonName] = useState('');
+
   const { unassignedItems } = calculateSplitBreakdown(state);
+  const totalItemsCount = state.items.length;
+  const assignedItemsCount = state.items.filter((it) => it.assignedTo.length > 0).length;
+  const allAssigned = totalItemsCount > 0 && assignedItemsCount === totalItemsCount;
 
   const handleAddPerson = (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,6 +63,17 @@ export const SplittingScreen: React.FC<SplittingScreenProps> = ({
 
     setNewPersonName('');
     setShowAddPersonInput(false);
+  };
+
+  const handleRenamePerson = (personId: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (trimmed) {
+      onUpdateState((prev) => ({
+        ...prev,
+        people: prev.people.map((p) => (p.id === personId ? { ...p, name: trimmed } : p)),
+      }));
+    }
+    setEditingPersonId(null);
   };
 
   const handleRemovePerson = (personId: string) => {
@@ -148,9 +165,14 @@ export const SplittingScreen: React.FC<SplittingScreenProps> = ({
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
-          Step 2 of 3: Tap who had what
-        </span>
+        <div className="text-center">
+          <span className="text-xs font-bold uppercase tracking-wider text-stone-500 block">
+            Step 2 of 3: Tap who had what
+          </span>
+          <span className="text-[11px] font-bold text-emerald-700">
+            {assignedItemsCount} of {totalItemsCount} items assigned
+          </span>
+        </div>
         <div className="w-8"></div>
       </div>
 
@@ -202,7 +224,7 @@ export const SplittingScreen: React.FC<SplittingScreenProps> = ({
           </form>
         )}
 
-        {/* Friends Badges */}
+        {/* Friends Badges with inline rename on tap */}
         <div className="flex flex-wrap gap-2">
           {state.people.map((person) => (
             <div
@@ -210,11 +232,38 @@ export const SplittingScreen: React.FC<SplittingScreenProps> = ({
               className={`inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 rounded-full border text-xs font-semibold ${person.bgLight}`}
             >
               <span
-                className="w-2.5 h-2.5 rounded-full"
+                className="w-2.5 h-2.5 rounded-full shrink-0"
                 style={{ backgroundColor: person.color }}
               />
-              <span>{person.name}</span>
-              {state.people.length > 1 && (
+              {editingPersonId === person.id ? (
+                <input
+                  type="text"
+                  value={editingPersonName}
+                  onChange={(e) => setEditingPersonName(e.target.value)}
+                  onBlur={() => handleRenamePerson(person.id, editingPersonName)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleRenamePerson(person.id, editingPersonName);
+                    }
+                  }}
+                  className="w-20 px-1 py-0.5 text-xs bg-white text-stone-900 font-bold border border-emerald-500 rounded outline-hidden"
+                  autoFocus
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingPersonId(person.id);
+                    setEditingPersonName(person.name);
+                  }}
+                  className="cursor-pointer hover:underline flex items-center gap-1 text-left"
+                  title="Tap to rename"
+                >
+                  <span>{person.name}</span>
+                </button>
+              )}
+              {state.people.length > 1 && editingPersonId !== person.id && (
                 <button
                   type="button"
                   onClick={() => handleRemovePerson(person.id)}
@@ -275,7 +324,11 @@ export const SplittingScreen: React.FC<SplittingScreenProps> = ({
                   <span className="font-bold text-sm text-stone-900">{item.name}</span>
                 </div>
                 <div className="text-right">
-                  <span className="font-mono-num font-bold text-sm text-stone-900">
+                  <span
+                    className={`font-mono-num font-bold text-sm ${
+                      item.price < 0 ? 'text-emerald-600' : 'text-stone-900'
+                    }`}
+                  >
                     {formatMoney(item.price, state.currency)}
                   </span>
                   {assignedCount > 1 && (
@@ -394,10 +447,15 @@ export const SplittingScreen: React.FC<SplittingScreenProps> = ({
           <button
             type="button"
             onClick={onNext}
-            className="w-full min-h-[52px] h-[52px] bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all text-white font-bold text-base rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer"
+            disabled={!allAssigned}
+            className={`w-full min-h-[52px] h-[52px] transition-all text-white font-bold text-base rounded-2xl flex items-center justify-center gap-2 cursor-pointer ${
+              allAssigned
+                ? 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] shadow-lg shadow-emerald-600/30'
+                : 'bg-stone-400 cursor-not-allowed opacity-80'
+            }`}
           >
-            <span>See the breakdown</span>
-            <ChevronRight className="w-5 h-5 stroke-[2.5]" />
+            <span>{allAssigned ? 'See the breakdown' : 'Assign all items to continue'}</span>
+            {allAssigned && <ChevronRight className="w-5 h-5 stroke-[2.5]" />}
           </button>
         </div>
       </div>

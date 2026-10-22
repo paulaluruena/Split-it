@@ -82,7 +82,9 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   };
 
   const handleSaveTax = () => {
-    const val = parseFloat(taxInput.replace(/[^0-9.]/g, '')) || 0;
+    const isNegative = taxInput.trim().startsWith('-');
+    const numeric = taxInput.replace(/[^0-9.]/g, '');
+    const val = (isNegative ? -1 : 1) * (parseFloat(numeric) || 0);
     onUpdateState((prev) => ({
       ...prev,
       tax: val,
@@ -229,7 +231,11 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
               </div>
 
               <div className="flex items-center gap-3">
-                <span className="font-mono-num font-bold text-sm text-stone-900">
+                <span
+                  className={`font-mono-num font-bold text-sm ${
+                    item.price < 0 ? 'text-emerald-600' : 'text-stone-900'
+                  }`}
+                >
                   {formatMoney(item.price, state.currency)}
                 </span>
                 <button

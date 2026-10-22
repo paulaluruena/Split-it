@@ -32,7 +32,7 @@ const DEFAULT_STATE: SplitState = {
   people: [
     {
       id: 'p-1',
-      name: 'You',
+      name: 'Me',
       color: getPersonPalette(0).color,
       bgLight: getPersonPalette(0).bgLight,
       borderCol: getPersonPalette(0).borderCol,
@@ -40,7 +40,7 @@ const DEFAULT_STATE: SplitState = {
     },
     {
       id: 'p-2',
-      name: 'Friend 1',
+      name: 'Friend 2',
       color: getPersonPalette(1).color,
       bgLight: getPersonPalette(1).bgLight,
       borderCol: getPersonPalette(1).borderCol,
@@ -55,6 +55,7 @@ export default function App() {
   const [splitState, setSplitState] = useState<SplitState>(DEFAULT_STATE);
   const [errorType, setErrorType] = useState<'not_a_receipt' | 'network_error'>('network_error');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [technicalError, setTechnicalError] = useState<string>('');
 
   // Check if opened from a shared link with encoded data in URL hash
   useEffect(() => {
@@ -74,6 +75,7 @@ export default function App() {
     } catch (err: any) {
       setErrorType('network_error');
       setErrorMessage(err?.message || 'Unable to process the image file.');
+      setTechnicalError(err?.message || String(err));
       setCurrentScreen('error');
     }
   };
@@ -82,6 +84,8 @@ export default function App() {
   const loadReceiptResponse = (data: RawReceiptResponse) => {
     if (!data.items || data.items.length === 0) {
       setErrorType('not_a_receipt');
+      setErrorMessage("We couldn't detect any line items or prices.");
+      setTechnicalError('No items found in OCR response.');
       setCurrentScreen('error');
       return;
     }
@@ -114,11 +118,16 @@ export default function App() {
     setCurrentScreen('review');
   };
 
-  // Send photo to Gemini OCR API
+  // Send photo to Gemini OCR API with 30s timeout
   const handleScanConfirmed = async () => {
     if (!processedImage) return;
 
     setCurrentScreen('scanning');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 30000); // 30-second timeout
 
     try {
       const res = await fetch('/api/parse-receipt', {
@@ -128,27 +137,46 @@ export default function App() {
           imageBase64: processedImage.base64,
           mimeType: processedImage.mimeType,
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!res.ok) {
-        throw new Error(`Server returned status ${res.status}`);
+        let errDetail = '';
+        try {
+          const errJson = await res.json();
+          errDetail = errJson.message || errJson.error || '';
+        } catch {
+          // ignore
+        }
+        throw new Error(`Server returned HTTP ${res.status}${errDetail ? `: ${errDetail}` : ''}`);
       }
 
       const result: RawReceiptResponse = await res.json();
 
       if (!result.items || result.items.length === 0) {
         setErrorType('not_a_receipt');
+        setErrorMessage("We couldn't detect any line items or prices.");
+        setTechnicalError('Gemini OCR returned empty items array.');
         setCurrentScreen('error');
         return;
       }
 
       loadReceiptResponse(result);
     } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('OCR Parsing Error:', err);
       setErrorType('network_error');
-      setErrorMessage(
-        'We encountered a problem while processing the receipt. Please make sure the photo is clear and try again.'
-      );
+      if (err?.name === 'AbortError') {
+        setErrorMessage('This is taking too long — check your connection and try again.');
+        setTechnicalError('AbortError: The request timed out after 30 seconds.');
+      } else {
+        setErrorMessage(
+          'We encountered a problem while processing the receipt. Please make sure the photo is clear and try again.'
+        );
+        setTechnicalError(err?.message || String(err));
+      }
       setCurrentScreen('error');
     }
   };
@@ -208,6 +236,7 @@ export default function App() {
         <ErrorScreen
           type={errorType}
           errorMessage={errorMessage}
+          technicalError={technicalError}
           onTryAgain={() => setCurrentScreen('start')}
           onEnterManually={handleManualEntry}
         />

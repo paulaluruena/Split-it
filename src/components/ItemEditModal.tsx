@@ -46,7 +46,9 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = name.trim() || 'Custom Item';
-    const parsedPrice = parseFloat(priceStr.replace(/[^0-9.]/g, '')) || 0;
+    const isNegative = priceStr.trim().startsWith('-');
+    const numeric = priceStr.replace(/[^0-9.]/g, '');
+    const parsedPrice = (isNegative ? -1 : 1) * (parseFloat(numeric) || 0);
 
     const savedItem: ReceiptItem = {
       id: item?.id || Math.random().toString(36).substring(2, 9),

@@ -1,5 +1,5 @@
 import { SplitState } from '../types';
-import { calculateSplitBreakdown, formatMoney } from './formatters';
+import { calculateSplitBreakdown, formatMoney, getPersonPalette } from './formatters';
 
 export function encodeSplitToUrl(state: SplitState): string {
   try {
@@ -75,14 +75,17 @@ export function decodeSplitFromUrl(): SplitState | null {
       customTipAmount: Number(parsed.cta) || 0,
       tipType: parsed.tt === 'amount' ? 'amount' : 'percent',
       confidence: 'high',
-      people: (parsed.p || []).map((p: any, idx: number) => ({
-        id: p.id || `p-${idx + 1}`,
-        name: p.n || `Friend ${idx + 1}`,
-        color: p.c || '#059669',
-        bgLight: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-        borderCol: 'border-emerald-500',
-        textCol: 'text-emerald-700',
-      })),
+      people: (parsed.p || []).map((p: any, idx: number) => {
+        const palette = getPersonPalette(idx);
+        return {
+          id: p.id || `p-${idx + 1}`,
+          name: p.n || `Friend ${idx + 1}`,
+          color: p.c || palette.color,
+          bgLight: palette.bgLight,
+          borderCol: palette.borderCol,
+          textCol: palette.textCol,
+        };
+      }),
     };
   } catch (err) {
     console.error('Failed to parse split from URL hash:', err);
