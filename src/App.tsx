@@ -140,14 +140,16 @@ export default function App() {
       clearTimeout(timeoutId);
 
       if (!res.ok) {
-        let errDetail = '';
+        let errMessage = '';
         try {
           const errJson = await res.json();
-          errDetail = errJson.message || errJson.error || '';
+          errMessage = errJson.message || errJson.error || '';
         } catch {
           // ignore
         }
-        throw new Error(`Server returned HTTP ${res.status}${errDetail ? `: ${errDetail}` : ''}`);
+        const error = new Error(errMessage || `Server returned HTTP ${res.status}`);
+        (error as any).serverMessage = errMessage;
+        throw error;
       }
 
       const result: RawReceiptResponse = await res.json();
@@ -204,12 +206,18 @@ export default function App() {
         setErrorType('network_error');
         if (retryErr?.name === 'AbortError') {
           setErrorMessage('This is taking too long — check your connection and try again.');
-          setTechnicalError('AbortError: The request timed out after 60 seconds (retry attempt).');
+          setTechnicalError('AbortError: The request timed out after 60 seconds (client timeout).');
         } else {
           setErrorMessage(
             'We encountered a problem while processing the receipt. Please make sure the photo is clear and try again.'
           );
-          setTechnicalError(retryErr?.message || String(retryErr));
+          const serverMsg =
+            retryErr?.serverMessage ||
+            retryErr?.message ||
+            firstErr?.serverMessage ||
+            firstErr?.message ||
+            String(retryErr);
+          setTechnicalError(serverMsg);
         }
         setCurrentScreen('error');
       } finally {

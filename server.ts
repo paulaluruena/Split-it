@@ -61,54 +61,76 @@ Instructions:
    - "currency": The currency symbol or code (e.g. "$", "€", "£", "CAD", "USD"). Default to "$".
    - "confidence": "high" if receipt is sharp and all numbers are unambiguous; "medium" if slightly faded, handwritten, or partially obscured; "low" if very blurry, unreadable, or not a receipt.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: [
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: cleanBase64,
-          },
-        },
-        {
-          text: systemPrompt,
-        },
-      ],
-      config: {
-        thinkingConfig: {
-          thinkingLevel: ThinkingLevel.LOW,
-        },
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            restaurant: { type: Type.STRING, nullable: true },
-            items: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  price: { type: Type.NUMBER },
-                  quantity: { type: Type.NUMBER },
-                },
-                required: ['name', 'price', 'quantity'],
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort(new Error('Gemini API call timed out after 40 seconds'));
+    }, 40000);
+
+    let response;
+    try {
+      response = await Promise.race([
+        ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: [
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: cleanBase64,
               },
             },
-            subtotal: { type: Type.NUMBER, nullable: true },
-            tax: { type: Type.NUMBER, nullable: true },
-            tip_included: { type: Type.NUMBER, nullable: true },
-            total: { type: Type.NUMBER, nullable: true },
-            currency: { type: Type.STRING },
-            confidence: {
-              type: Type.STRING,
-              enum: ['high', 'medium', 'low'],
+            {
+              text: systemPrompt,
+            },
+          ],
+          config: {
+            thinkingConfig: {
+              thinkingLevel: ThinkingLevel.LOW,
+            },
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                restaurant: { type: Type.STRING, nullable: true },
+                items: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING },
+                      price: { type: Type.NUMBER },
+                      quantity: { type: Type.NUMBER },
+                    },
+                    required: ['name', 'price', 'quantity'],
+                  },
+                },
+                subtotal: { type: Type.NUMBER, nullable: true },
+                tax: { type: Type.NUMBER, nullable: true },
+                tip_included: { type: Type.NUMBER, nullable: true },
+                total: { type: Type.NUMBER, nullable: true },
+                currency: { type: Type.STRING },
+                confidence: {
+                  type: Type.STRING,
+                  enum: ['high', 'medium', 'low'],
+                },
+              },
+              required: ['items', 'currency', 'confidence'],
             },
           },
-          required: ['items', 'currency', 'confidence'],
-        },
-      },
-    });
+          // @ts-ignore
+          httpOptions: {
+            timeout: 40000,
+            signal: controller.signal,
+          },
+        }),
+        new Promise<never>((_, reject) => {
+          controller.signal.addEventListener('abort', () => {
+            reject(new Error('Gemini generateContent timed out after 40 seconds'));
+          });
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[Gemini OCR] Call completed in ${elapsedSeconds} seconds`);
@@ -122,12 +144,84 @@ Instructions:
     return res.json(data);
   } catch (err: any) {
     const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.error(`[Gemini OCR] Call failed after ${elapsedSeconds} seconds:`, err);
+    const realErrorText = err?.message || String(err);
+    console.error(`[Gemini OCR] Call failed after ${elapsedSeconds} seconds:`, realErrorText);
     return res.status(500).json({
       error: 'Failed to process receipt',
-      message: err?.message || 'Server error occurred during OCR',
+      message: `${realErrorText} (${elapsedSeconds}s)`,
+      elapsedSeconds: parseFloat(elapsedSeconds),
       items: [],
       confidence: 'low',
+    });
+  }
+});
+
+// Test endpoint: sends Gemini the text "Reply with the word OK" (no image)
+app.get('/api/test-gemini', async (req, res) => {
+  const startTime = Date.now();
+  const apiKeySet = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== '');
+  const modelName = 'gemini-3.8-flash';
+
+  if (!apiKeySet) {
+    const elapsedSeconds = parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
+    return res.status(500).json({
+      ok: false,
+      reply: null,
+      elapsedSeconds,
+      modelName,
+      apiKeySet: false,
+      error: 'GEMINI_API_KEY environment variable is not set.',
+    });
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort(new Error('Test call timed out after 30 seconds'));
+    }, 30000);
+
+    let response;
+    try {
+      response = await Promise.race([
+        ai.models.generateContent({
+          model: modelName,
+          contents: 'Reply with the word OK',
+          // @ts-ignore
+          httpOptions: {
+            timeout: 30000,
+            signal: controller.signal,
+          },
+        }),
+        new Promise<never>((_, reject) => {
+          controller.signal.addEventListener('abort', () => {
+            reject(new Error('Test call timed out after 30 seconds'));
+          });
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const elapsedSeconds = parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
+    const reply = response.text?.trim() || '';
+
+    return res.json({
+      ok: true,
+      reply,
+      elapsedSeconds,
+      modelName,
+      apiKeySet: true,
+      error: null,
+    });
+  } catch (err: any) {
+    const elapsedSeconds = parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
+    return res.status(500).json({
+      ok: false,
+      reply: null,
+      elapsedSeconds,
+      modelName,
+      apiKeySet: true,
+      error: err?.message || String(err),
     });
   }
 });
