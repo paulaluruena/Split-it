@@ -1,0 +1,243 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect } from 'react';
+import { StartScreen } from './components/StartScreen';
+import { PreviewScreen } from './components/PreviewScreen';
+import { ScanningScreen } from './components/ScanningScreen';
+import { ErrorScreen } from './components/ErrorScreen';
+import { ReviewScreen } from './components/ReviewScreen';
+import { SplittingScreen } from './components/SplittingScreen';
+import { SummaryScreen } from './components/SummaryScreen';
+import { ProcessedImage, processReceiptImage } from './utils/imageUtils';
+import { RawReceiptResponse, ReceiptItem, SplitState } from './types';
+import { getPersonPalette } from './utils/formatters';
+import { decodeSplitFromUrl } from './utils/shareUtils';
+
+type Screen = 'start' | 'preview' | 'scanning' | 'error' | 'review' | 'splitting' | 'summary';
+
+const DEFAULT_STATE: SplitState = {
+  restaurant: 'Restaurant',
+  currency: '$',
+  items: [],
+  subtotal: 0,
+  tax: 0,
+  tipIncluded: 0,
+  tipRate: 18,
+  customTipAmount: 0,
+  tipType: 'percent',
+  confidence: 'high',
+  people: [
+    {
+      id: 'p-1',
+      name: 'You',
+      color: getPersonPalette(0).color,
+      bgLight: getPersonPalette(0).bgLight,
+      borderCol: getPersonPalette(0).borderCol,
+      textCol: getPersonPalette(0).textCol,
+    },
+    {
+      id: 'p-2',
+      name: 'Friend 1',
+      color: getPersonPalette(1).color,
+      bgLight: getPersonPalette(1).bgLight,
+      borderCol: getPersonPalette(1).borderCol,
+      textCol: getPersonPalette(1).textCol,
+    },
+  ],
+};
+
+export default function App() {
+  const [currentScreen, setCurrentScreen] = useState<Screen>('start');
+  const [processedImage, setProcessedImage] = useState<ProcessedImage | null>(null);
+  const [splitState, setSplitState] = useState<SplitState>(DEFAULT_STATE);
+  const [errorType, setErrorType] = useState<'not_a_receipt' | 'network_error'>('network_error');
+  const [errorMessage, setErrorMessage] = useState<string>('');
+
+  // Check if opened from a shared link with encoded data in URL hash
+  useEffect(() => {
+    const sharedData = decodeSplitFromUrl();
+    if (sharedData && sharedData.items.length > 0) {
+      setSplitState(sharedData);
+      setCurrentScreen('summary');
+    }
+  }, []);
+
+  // When user selects a file from Camera or Photo Library
+  const handleFileSelected = async (file: File) => {
+    try {
+      const processed = await processReceiptImage(file);
+      setProcessedImage(processed);
+      setCurrentScreen('preview');
+    } catch (err: any) {
+      setErrorType('network_error');
+      setErrorMessage(err?.message || 'Unable to process the image file.');
+      setCurrentScreen('error');
+    }
+  };
+
+  // Convert raw API response or sample into active SplitState
+  const loadReceiptResponse = (data: RawReceiptResponse) => {
+    if (!data.items || data.items.length === 0) {
+      setErrorType('not_a_receipt');
+      setCurrentScreen('error');
+      return;
+    }
+
+    const itemsSum = data.items.reduce((s, it) => s + (Number(it.price) || 0), 0);
+    const subtotal = data.subtotal && data.subtotal > 0 ? data.subtotal : itemsSum;
+
+    const receiptItems: ReceiptItem[] = data.items.map((it, idx) => ({
+      id: `it-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+      name: it.name || `Item ${idx + 1}`,
+      price: Number(it.price) || 0,
+      quantity: Number(it.quantity) || 1,
+      assignedTo: [], // Initially unassigned for friend tagging
+    }));
+
+    setSplitState((prev) => ({
+      ...prev,
+      restaurant: data.restaurant || 'Restaurant Bill',
+      currency: data.currency || '$',
+      items: receiptItems,
+      subtotal: subtotal,
+      tax: Number(data.tax) || 0,
+      tipIncluded: Number(data.tip_included) || 0,
+      confidence: data.confidence || 'high',
+      tipRate: 18,
+      tipType: 'percent',
+      customTipAmount: 0,
+    }));
+
+    setCurrentScreen('review');
+  };
+
+  // Send photo to Gemini OCR API
+  const handleScanConfirmed = async () => {
+    if (!processedImage) return;
+
+    setCurrentScreen('scanning');
+
+    try {
+      const res = await fetch('/api/parse-receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: processedImage.base64,
+          mimeType: processedImage.mimeType,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
+      }
+
+      const result: RawReceiptResponse = await res.json();
+
+      if (!result.items || result.items.length === 0) {
+        setErrorType('not_a_receipt');
+        setCurrentScreen('error');
+        return;
+      }
+
+      loadReceiptResponse(result);
+    } catch (err: any) {
+      console.error('OCR Parsing Error:', err);
+      setErrorType('network_error');
+      setErrorMessage(
+        'We encountered a problem while processing the receipt. Please make sure the photo is clear and try again.'
+      );
+      setCurrentScreen('error');
+    }
+  };
+
+  const handleManualEntry = () => {
+    setSplitState((prev) => ({
+      ...prev,
+      restaurant: 'Manual Bill',
+      items: [
+        {
+          id: `it-${Date.now()}`,
+          name: 'First Item',
+          price: 10.0,
+          quantity: 1,
+          assignedTo: [],
+        },
+      ],
+      subtotal: 10.0,
+      tax: 0.8,
+      confidence: 'high',
+    }));
+    setCurrentScreen('review');
+  };
+
+  const handleStartNew = () => {
+    setProcessedImage(null);
+    // Clear URL hash
+    if (window.location.hash) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    setSplitState(DEFAULT_STATE);
+    setCurrentScreen('start');
+  };
+
+  return (
+    <div className="min-h-screen bg-stone-100/90 text-stone-900 selection:bg-emerald-100 selection:text-emerald-900">
+      {currentScreen === 'start' && (
+        <StartScreen
+          onFileSelected={handleFileSelected}
+          onSelectSample={loadReceiptResponse}
+        />
+      )}
+
+      {currentScreen === 'preview' && processedImage && (
+        <PreviewScreen
+          processedImage={processedImage}
+          onConfirm={handleScanConfirmed}
+          onRetake={() => setCurrentScreen('start')}
+        />
+      )}
+
+      {currentScreen === 'scanning' && (
+        <ScanningScreen processedImage={processedImage} />
+      )}
+
+      {currentScreen === 'error' && (
+        <ErrorScreen
+          type={errorType}
+          errorMessage={errorMessage}
+          onTryAgain={() => setCurrentScreen('start')}
+          onEnterManually={handleManualEntry}
+        />
+      )}
+
+      {currentScreen === 'review' && (
+        <ReviewScreen
+          state={splitState}
+          onUpdateState={setSplitState}
+          onNext={() => setCurrentScreen('splitting')}
+          onBack={() => setCurrentScreen('start')}
+        />
+      )}
+
+      {currentScreen === 'splitting' && (
+        <SplittingScreen
+          state={splitState}
+          onUpdateState={setSplitState}
+          onNext={() => setCurrentScreen('summary')}
+          onBack={() => setCurrentScreen('review')}
+        />
+      )}
+
+      {currentScreen === 'summary' && (
+        <SummaryScreen
+          state={splitState}
+          onEditSplit={() => setCurrentScreen('splitting')}
+          onStartNew={handleStartNew}
+        />
+      )}
+    </div>
+  );
+}

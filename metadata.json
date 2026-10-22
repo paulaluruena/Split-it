@@ -1,0 +1,10 @@
+{
+  "name": "Split It",
+  "description": "Snap the receipt. Tap who had what. Done.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
