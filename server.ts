@@ -1,26 +1,3 @@
-Claude
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Server · TS
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
@@ -47,51 +24,72 @@ const ai = new GoogleGenAI({
 });
  
 // ---------- Gemini retry + backup models ----------
-// Gemini sometimes answers 503 "high demand". We retry the main model,
-// then try other Flash models available to this API key.
+// The free Gemini tier allows only a few requests per minute per model (429),
+// and the main model is sometimes overloaded (503). So: try the main model,
+// retry once only if it is overloaded, then try other Flash models, which
+// each have their own separate per-minute limit.
 const PRIMARY_MODEL = 'gemini-3.8-flash';
+const KNOWN_BACKUPS = [
+  'gemini-flash-latest',
+  'gemini-2.5-flash',
+  'gemini-flash-lite-latest',
+  'gemini-2.5-flash-lite',
+];
 let cachedBackupModels: string[] | null = null;
+ 
+async function listFlashModels(): Promise<string[]> {
+  const found: string[] = [];
+  const pager: any = await ai.models.list();
+  for await (const m of pager) {
+    const name = String(m?.name || '').replace(/^models\//, '');
+    const actions: string[] = m?.supportedActions || [];
+    const canGenerate = actions.length === 0 || actions.includes('generateContent');
+    if (
+      name &&
+      /flash/i.test(name) &&
+      !/(image|tts|audio|live|embedding|thinking|preview|exp)/i.test(name) &&
+      canGenerate
+    ) {
+      found.push(name);
+    }
+  }
+  found.sort((x, y) => {
+    const lx = /lite/i.test(x) ? 1 : 0;
+    const ly = /lite/i.test(y) ? 1 : 0;
+    if (lx !== ly) return lx - ly;
+    return y.localeCompare(x, undefined, { numeric: true });
+  });
+  return found;
+}
  
 async function getBackupModels(): Promise<string[]> {
   if (cachedBackupModels) return cachedBackupModels;
-  const found: string[] = [];
+  let listed: string[] = [];
   try {
-    const pager: any = await ai.models.list();
-    for await (const m of pager) {
-      const name = String(m?.name || '').replace(/^models\//, '');
-      const actions: string[] = m?.supportedActions || [];
-      const canGenerate = actions.length === 0 || actions.includes('generateContent');
-      if (
-        name &&
-        name !== PRIMARY_MODEL &&
-        /flash/i.test(name) &&
-        !/(image|tts|audio|live|embedding|thinking-exp)/i.test(name) &&
-        canGenerate
-      ) {
-        found.push(name);
-      }
-    }
+    listed = await Promise.race([
+      listFlashModels(),
+      new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 5000)),
+    ]);
   } catch (e: any) {
     console.warn('[Gemini OCR] Could not list models:', e?.message || e);
   }
-  // Stable models first, then previews; newest versions first.
-  found.sort((a, b) => {
-    const pa = /preview|exp/i.test(a) ? 1 : 0;
-    const pb = /preview|exp/i.test(b) ? 1 : 0;
-    if (pa !== pb) return pa - pb;
-    const la = /lite/i.test(a) ? 1 : 0;
-    const lb = /lite/i.test(b) ? 1 : 0;
-    if (la !== lb) return la - lb;
-    return b.localeCompare(a, undefined, { numeric: true });
-  });
-  cachedBackupModels = found.slice(0, 3);
+  const all = [...listed, ...KNOWN_BACKUPS].filter((m) => m !== PRIMARY_MODEL);
+  cachedBackupModels = Array.from(new Set(all)).slice(0, 6);
   console.log('[Gemini OCR] Backup models:', cachedBackupModels);
   return cachedBackupModels;
 }
  
-function isBusyError(err: any): boolean {
-  const text = String(err?.message || err);
-  return /503|429|500|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded|timed out|not found|404/i.test(text);
+function errorText(err: any): string {
+  return String(err?.message || err);
+}
+function isRateLimit(err: any): boolean {
+  return /429|RESOURCE_EXHAUSTED|quota/i.test(errorText(err));
+}
+function isOverloaded(err: any): boolean {
+  return /503|500|UNAVAILABLE|high demand|overloaded|timed out/i.test(errorText(err));
+}
+function isModelMissing(err: any): boolean {
+  return /404|not found|NOT_FOUND|not supported/i.test(errorText(err));
 }
  
 async function generateWithTimeout(model: string, contents: any, config: any, ms: number): Promise<any> {
@@ -110,42 +108,48 @@ async function generateWithTimeout(model: string, contents: any, config: any, ms
  
 async function callGeminiWithFallback(contents: any, config: any): Promise<{ response: any; modelUsed: string }> {
   const deadline = Date.now() + 50000;
-  let lastError: any = null;
+  const errors: any[] = [];
  
-  // 1) Main model: up to 3 tries, waiting 1s then 2s between tries.
-  const waits = [0, 1000, 2000];
-  for (const wait of waits) {
-    if (wait) await new Promise((r) => setTimeout(r, wait));
+  // 1) Main model: one try, plus one retry only if it was overloaded (503).
+  for (let attempt = 0; attempt < 2; attempt++) {
     const timeLeft = deadline - Date.now();
     if (timeLeft < 3000) break;
     try {
       const response = await generateWithTimeout(PRIMARY_MODEL, contents, config, Math.min(15000, timeLeft));
       return { response, modelUsed: PRIMARY_MODEL };
     } catch (err: any) {
-      lastError = err;
-      console.warn(`[Gemini OCR] ${PRIMARY_MODEL} failed:`, err?.message || err);
-      if (!isBusyError(err)) throw err;
+      errors.push(err);
+      console.warn(`[Gemini OCR] ${PRIMARY_MODEL} failed:`, errorText(err));
+      if (isRateLimit(err)) break; // per-minute limit: retrying the same model won't help
+      if (!isOverloaded(err) && !isModelMissing(err)) throw err; // a real error: report it
+      if (isModelMissing(err)) break;
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
  
-  // 2) Backup models.
+  // 2) Backup models, one try each.
   for (const model of await getBackupModels()) {
     const timeLeft = deadline - Date.now();
     if (timeLeft < 3000) break;
     try {
-      const response = await generateWithTimeout(model, contents, config, Math.min(15000, timeLeft));
+      const response = await generateWithTimeout(model, contents, config, Math.min(12000, timeLeft));
       return { response, modelUsed: model };
     } catch (err: any) {
-      lastError = err;
-      console.warn(`[Gemini OCR] Backup ${model} failed:`, err?.message || err);
+      if (!isModelMissing(err)) errors.push(err);
+      console.warn(`[Gemini OCR] Backup ${model} failed:`, errorText(err));
     }
   }
  
-  const msg = String(lastError?.message || lastError || 'Unknown error');
-  if (/503|429|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded/i.test(msg)) {
-    throw new Error(`Gemini is very busy right now — wait a few seconds and tap Try again. (${msg})`);
+  // 3) Everything failed: give a clear reason.
+  const lastError = errors[errors.length - 1];
+  const detail = errorText(lastError || 'Unknown error');
+  if (errors.length > 0 && errors.every(isRateLimit)) {
+    throw new Error(`Gemini is very busy right now — too many scans in the last minute (free limit). Wait about a minute and tap Try again. (${detail})`);
   }
-  throw lastError || new Error(msg);
+  if (errors.some((e) => isRateLimit(e) || isOverloaded(e))) {
+    throw new Error(`Gemini is very busy right now — wait a few seconds and tap Try again. (${detail})`);
+  }
+  throw lastError || new Error(detail);
 }
  
 app.post('/api/parse-receipt', async (req, res) => {
@@ -411,5 +415,3 @@ if (!isProd) {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Split It server running on http://0.0.0.0:${PORT}`);
 });
- 
-Claude finished the response

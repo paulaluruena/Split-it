@@ -204,20 +204,26 @@ export default function App() {
       } catch (retryErr: any) {
         console.error('Retry scan attempt failed:', retryErr);
         setErrorType('network_error');
-        if (retryErr?.name === 'AbortError') {
+        const serverMsg =
+          retryErr?.serverMessage ||
+          retryErr?.message ||
+          firstErr?.serverMessage ||
+          firstErr?.message ||
+          String(retryErr);
+        setTechnicalError(serverMsg);
+
+        const isHighDemand =
+          /503|429|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded|very busy/i.test(serverMsg);
+
+        if (isHighDemand) {
+          setErrorMessage('Gemini is very busy right now — wait a few seconds and tap Try again.');
+        } else if (retryErr?.name === 'AbortError') {
           setErrorMessage('This is taking too long — check your connection and try again.');
           setTechnicalError('No response from server after 60 seconds (upload may have failed)');
         } else {
           setErrorMessage(
             'We encountered a problem while processing the receipt. Please make sure the photo is clear and try again.'
           );
-          const serverMsg =
-            retryErr?.serverMessage ||
-            retryErr?.message ||
-            firstErr?.serverMessage ||
-            firstErr?.message ||
-            String(retryErr);
-          setTechnicalError(serverMsg);
         }
         setCurrentScreen('error');
       } finally {

@@ -67,7 +67,7 @@ export const ScanningScreen: React.FC<ScanningScreenProps> = ({
             key={isRetrying ? 'retrying' : messageIndex}
             className="text-lg font-bold text-stone-800 transition-all duration-300 animate-fadeIn"
           >
-            {isRetrying ? 'Still working… almost there' : ROTATING_MESSAGES[messageIndex]}
+            {isRetrying ? 'Gemini is busy — trying again…' : (messageIndex >= ROTATING_MESSAGES.length - 1 ? 'Gemini is busy — trying again…' : ROTATING_MESSAGES[messageIndex])}
           </p>
         </div>
 
@@ -84,7 +84,9 @@ export const ScanningScreen: React.FC<ScanningScreenProps> = ({
         </div>
 
         <p className="text-xs text-stone-400">
-          {isRetrying ? 'Retrying extraction automatically…' : 'This usually takes only 2–4 seconds'}
+          {isRetrying || messageIndex >= ROTATING_MESSAGES.length - 1
+            ? 'Trying backup models and retrying…'
+            : 'This usually takes only 2–4 seconds'}
         </p>
       </div>
     </div>
